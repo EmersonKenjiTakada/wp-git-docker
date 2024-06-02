@@ -1,0 +1,88 @@
+version: '2'
+
+services:
+  # Nginx Proxy Server, ports 都由他管理
+  nginx-proxy:
+    container_name: nginx-proxy
+    image: jwilder/nginx-proxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - '/var/run/docker.sock:/tmp/docker.sock:ro'
+      - '~/nginx/certs:/etc/nginx/certs:ro' 
+      - 'nginx-conf:/etc/nginx/conf.d'
+      - 'nginx-vhost:/etc/nginx/vhost.d'
+      - 'nginx-www:/usr/share/nginx/html'
+    environment:
+      - ENABLE_IPV6=true
+    networks:
+      - nginx-proxy
+
+  # 自動申請 Let's Encrypt
+  ssl-companion:
+    container_name: ssl-companion
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    volumes_from:
+      - nginx-proxy
+    volumes:
+      - '~/nginx/certs:/etc/nginx/certs:rw'
+      - '/var/run/docker.sock:/var/run/docker.sock:ro'
+    networks:
+      - nginx-proxy
+
+  # http server，要設定網址
+  web:
+    container_name: nginx
+    image: nginx:alpine
+    restart: always
+    depends_on:
+      - wordpress
+    volumes:
+      - '~/wp-git/nginx/conf.d:/etc/nginx/conf.d'
+      - '~/wp-git/wordpress:/var/www/html'
+      - '~/nginx/certs:/etc/nginx/certs:ro'
+    environment:
+      - VIRTUAL_HOST=yourdomain.com,sub.yourdomain.com
+      - LETSENCRYPT_HOST=yourdomain.com,sub.yourdomain.com
+      - LETSENCRYPT_EMAIL=youremail@gmail.com
+    networks:
+      - nginx-proxy
+
+  # MariaDB，MySQL的取代品，密碼要跟 WordPress 一樣
+  db:
+    container_name: db
+    image: mariadb:10.3.8
+    restart: always
+    volumes:
+      - wp-db:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=password
+    networks:
+      - nginx-proxy
+
+  # WordPress本體，使用PHP-fpm
+  wordpress:
+    container_name: wordpress
+    image: wordpress:fpm
+    depends_on:
+      - db
+    restart: always
+    volumes:
+      - ./wp-git/wordpress:/var/www/html
+      - ./wp-git/php/conf.d/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini
+    environment:
+      - WORDPRESS_DB_HOST=db:3306
+      - WORDPRESS_DB_PASSWORD=password
+    networks:
+      - nginx-proxy
+
+volumes:
+  wp-db:
+  nginx-conf:
+  nginx-vhost:
+  nginx-www:
+
+networks:
+  nginx-proxy:
